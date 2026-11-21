@@ -1,0 +1,6 @@
+streamlit>=1.40
+streamlit-autorefresh>=1.0.1
+requests
+pandas
+plotly
+pyvis==0.3.2
