@@ -1,23 +1,3 @@
-"""
-replay.py - telemetry simulator for the Mechanical Workshop Digital Twin.
-
-Reads workshop_data.csv row by row and publishes each row as MQTT messages,
-so a recorded dataset behaves like a live sensor feed.
-
-Topics
-  workshop/zone1/environment       temperature_c, humidity_pct, co2_ppm
-  workshop/zone1/noise             noise_db
-  workshop/machine1/status         lathe status (RUNNING / IDLE / DOWN)
-  workshop/machine2/status         drill status
-  workshop/machine1/maintenance    maintenance start / end events
-
-Examples
-  python replay.py                               # 1 row every 5 s, localhost:1883
-  python replay.py --interval 1                  # faster, for testing
-  python replay.py --start-row 360               # jump to just before the lathe failure
-  python replay.py --fail lathe --fail-at 10 --fail-for 12   # force a lathe failure on demand
-  python replay.py --loop                        # restart from the top when the CSV ends
-"""
 import argparse
 import json
 import math
@@ -39,7 +19,6 @@ def now_iso():
 
 
 def clean(v):
-    """NaN -> None so it becomes JSON null; numpy numbers -> plain Python."""
     if v is None:
         return None
     if isinstance(v, float) and math.isnan(v):
@@ -67,14 +46,12 @@ def publish(client, topic, payload, verbose):
         print(f"  -> {topic} {json.dumps(payload['measurements'])}")
 
 
-def make_msg(prefix, seq, asset_id, sensor_id, source, src_ts, measurements):
+def make_msg(prefix, seq, asset_id, sensor_id, src_ts, measurements):
     return {
-        # same source timestamp + same stream = same message_id, so the backend can spot duplicates
         "message_id": f"{prefix}-{src_ts}",
         "seq": seq,
         "asset_id": asset_id,
         "sensor_id": sensor_id,
-        "source": source,
         "source_timestamp": src_ts,
         "event_timestamp": now_iso(),
         "measurements": measurements,
@@ -97,8 +74,7 @@ def main():
     a = ap.parse_args()
 
     df = pd.read_csv(a.csv)
-    # test_case is our answer key for validation - it is never published
-    df = df.drop(columns=["test_case"], errors="ignore")
+    df = df.drop(columns=["test_case", "env_source"], errors="ignore")
     maint = pd.read_csv(a.maintenance) if os.path.exists(a.maintenance) else pd.DataFrame()
     sent_maint = set()
 
@@ -121,14 +97,14 @@ def main():
 
             seq += 1
             publish(client, f"{BASE}/zone1/environment", make_msg(
-                "env", seq, "zone1", "ENV-01", r.get("env_source", "real"), ts,
+                "env", seq, "zone1", "ENV-01", ts,
                 {"temperature_c": clean(r["temperature_c"]),
                  "humidity_pct": clean(r["humidity_pct"]),
                  "co2_ppm": clean(r["co2_ppm"])}), verbose)
 
             seq += 1
             publish(client, f"{BASE}/zone1/noise", make_msg(
-                "noise", seq, "zone1", "NOISE-01", "synthetic", ts,
+                "noise", seq, "zone1", "NOISE-01", ts,
                 {"noise_db": clean(r["noise_db"])}), verbose)
 
             forced = a.fail and a.fail_at <= tick < a.fail_at + a.fail_for
@@ -138,10 +114,9 @@ def main():
                     status = "DOWN"
                 seq += 1
                 publish(client, f"{BASE}/{machine_id}/status", make_msg(
-                    f"{machine_id}-status", seq, machine_id, sensor_id, "synthetic", ts,
+                    f"{machine_id}-status", seq, machine_id, sensor_id, ts,
                     {"status": status}), verbose)
 
-            # maintenance events: publish when the replay clock reaches start / end
             for _, m in maint.iterrows():
                 for edge, col in (("STARTED", "maintenance_start"), ("COMPLETED", "maintenance_end")):
                     key = (m["event_id"], edge)
@@ -149,7 +124,7 @@ def main():
                         sent_maint.add(key)
                         seq += 1
                         publish(client, f"{BASE}/{m['machine_id']}/maintenance", make_msg(
-                            f"maint-{edge.lower()}", seq, m["machine_id"], "CMMS", "synthetic", m[col],
+                            f"maint-{edge.lower()}", seq, m["machine_id"], "CMMS", m[col],
                             {"event_id": m["event_id"], "event_type": m["event_type"], "state": edge,
                              "start": m["maintenance_start"], "end": m["maintenance_end"],
                              "reason": m["reason"]}), verbose)
