@@ -28,7 +28,7 @@ Topics: `workshop/zone1/environment`, `workshop/zone1/noise`, `workshop/machine1
 
 ```json
 {"message_id": "env-000123", "seq": 123, "asset_id": "zone1", "sensor_id": "ENV-01",
- "source": "real", "source_timestamp": "2023-07-10T09:15:00Z", "event_timestamp": "2026-11-21T14:02:11Z",
+ "source_timestamp": "2023-07-10T09:15:00Z", "event_timestamp": "2026-11-21T14:02:11Z",
  "measurements": {"temperature_c": 27.4, "humidity_pct": 48.0, "co2_ppm": 910}}
 ```
 Status topics use `"measurements": {"status": "RUNNING"}`. Maintenance uses

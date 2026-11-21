@@ -41,13 +41,13 @@ docker exec -it mosquitto mosquitto_sub -t 'workshop/#' -v
   "seq": 1,
   "asset_id": "zone1",
   "sensor_id": "ENV-01",
-  "source": "real",
   "source_timestamp": "2023-07-10T09:39:32Z",
   "event_timestamp": "2026-11-21T12:57:20.876Z",
   "measurements": {"temperature_c": 29.6, "humidity_pct": 42.4, "co2_ppm": 913.0}
 }
 ```
-- `source`: `real`, `real+synthetic` (CO2 spike rows) or `synthetic`
+- Messages carry no `source` field; the backend tags each reading with its DataSource (`CSV-01`).
+  Which columns are real or synthetic is documented under Data below.
 - `source_timestamp`: original dataset time; `event_timestamp`: time it was published
 - Missing values arrive as `null`. A repeated `message_id` means a duplicate.
 - The CSV's `test_case` column is never published; it's our answer key for testing.

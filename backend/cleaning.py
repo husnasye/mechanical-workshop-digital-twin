@@ -7,7 +7,8 @@ import json
 import math
 from datetime import datetime, timezone
 
-from config import DEFAULT_SENSORS, MACHINES, SIGNALS_BY_KIND, UNITS, VALID_RANGES, VALID_STATUSES, ZONE_ID
+from config import (DATA_SOURCE_ID, DEFAULT_SENSORS, MACHINES, SIGNALS_BY_KIND, UNITS, VALID_RANGES,
+                    VALID_STATUSES, ZONE_ID)
 
 
 class Rejected(Exception):
@@ -92,7 +93,9 @@ def clean(topic, raw, is_duplicate):
         "kind": kind,
         "asset_id": asset_id,
         "sensor_id": msg.get("sensor_id") or DEFAULT_SENSORS.get((asset_id, kind)),
-        "source": msg.get("source", "unknown"),
+        # enrichment: telemetry no longer says where it came from, so tag it with the
+        # DataSource node that feeds the sensors (an optional "source" field still wins)
+        "source": msg.get("source") or DATA_SOURCE_ID,
         "source_ts": iso(source_ts),
         "event_ts": iso(event_ts),
         "dedup_key": dedup_key,

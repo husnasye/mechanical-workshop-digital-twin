@@ -37,7 +37,7 @@ SEQ = [0]
 
 def msg(kind, asset, values, src_ts, **extra):
     SEQ[0] += 1
-    body = {"message_id": f"{kind}-{SEQ[0]:06d}", "seq": SEQ[0], "asset_id": asset, "source": "real",
+    body = {"message_id": f"{kind}-{SEQ[0]:06d}", "seq": SEQ[0], "asset_id": asset,
             "source_timestamp": src_ts, "event_timestamp": iso(datetime.now(timezone.utc)), "measurements": values}
     body.update(extra)
     return f"workshop/{asset}/{kind}", json.dumps(body).encode()
@@ -55,7 +55,9 @@ def env(t, **over):
 
 def test_valid_message_accepted(tmp_path):
     tw = make_twin(tmp_path)
-    assert tw.handle(*env("2023-07-10T08:50:02Z")) is not None
+    ev = tw.handle(*env("2023-07-10T08:50:02Z"))
+    assert ev is not None
+    assert ev["source"] == "CSV-01"  # no "source" in the payload: tagged with the DataSource id
     assert tw.zone["temperature_c"] == 26.0
 
 
