@@ -1,0 +1,155 @@
+"""The processing pipeline: clean -> store -> update state -> analytics -> write back to the graph."""
+import logging
+import threading
+import time
+from collections import deque
+from datetime import datetime, timedelta, timezone
+
+from analytics import NOISE_AVG_SAMPLES, evaluate_rules, machine_kpis, zone_risk
+from cleaning import Rejected, clean, iso, parse_ts
+from config import DEDUP_SECONDS, KPI_WINDOW_MIN, MACHINES, ZONE_ID
+from storage import STATUS_SIGNAL
+
+log = logging.getLogger("twin")
+ZONE_SIGNALS = ("temperature_c", "humidity_pct", "co2_ppm", "noise_db")
+
+
+class Twin:
+    def __init__(self, storage, graph, predictor=None):
+        self.store = storage
+        self.graph = graph
+        self.predictor = predictor
+        self.lock = threading.Lock()
+        self.zone = {s: None for s in ZONE_SIGNALS}
+        self.machines = {m: "IDLE" for m in MACHINES}
+        self.source = None
+        self.timestamp = None
+        self.stats = {"accepted": 0, "rejected": 0}
+        self.prediction = None
+        self.recent = {}  # topic -> deque of (message_id, dedup_key, received epoch seconds)
+        self.noise_window = deque(maxlen=NOISE_AVG_SAMPLES)
+        self._restore()
+
+    def _is_duplicate(self, topic, message_id, dedup_key):
+        """Same message_id or same original reading on this topic within DEDUP_SECONDS?"""
+        now = time.time()
+        if topic not in self.recent:  # after a restart, warm up from SQLite
+            q = deque()
+            for mid, key, ts in self.store.recent_ids(topic, DEDUP_SECONDS):
+                q.append((mid, key, parse_ts(ts).timestamp()))
+            self.recent[topic] = q
+        q = self.recent[topic]
+        while q and q[0][2] < now - DEDUP_SECONDS:
+            q.popleft()
+        return any(mid == message_id or key == dedup_key for mid, key, _ in q)
+
+    def _restore(self):
+        """Rebuild the in-memory latest state from SQLite after a restart."""
+        for r in self.store.latest():
+            if r["signal"] in self.zone:
+                self.zone[r["signal"]] = r["value"]
+            for mid, sig in STATUS_SIGNAL.items():
+                if r["signal"] == sig:
+                    self.machines[mid] = r["value_text"]
+            if self.timestamp is None or r["event_ts"] > self.timestamp:
+                self.timestamp, self.source = r["event_ts"], r["source"]
+
+    # ---------------------------------------------------------------- pipeline
+    def handle(self, topic, payload):
+        with self.lock:
+            try:
+                ev = clean(topic, payload, lambda mid, key: self._is_duplicate(topic, mid, key))
+            except Rejected as r:
+                self.stats["rejected"] += 1
+                self.store.save_rejected(topic, r.message_id, r.reason, payload)
+                log.warning("REJECTED %-28s %s", topic, r.reason)
+                return None
+            self.store.save_event(ev)
+            self.recent[topic].append((ev["message_id"], ev["dedup_key"], time.time()))
+            self.stats["accepted"] += 1
+            stmts = self._apply(ev)
+            self.graph.run(stmts)
+            note = f" ({'; '.join(ev['notes'])})" if ev["notes"] else ""
+            log.info("ACCEPTED %-28s seq=%s %s%s", topic, ev.get("seq"), ev["values"], note)
+            return ev
+
+    def _apply(self, ev):
+        """Update the in-memory twin and return the Cypher statements that mirror it in Memgraph."""
+        stmts = []
+        self.timestamp, self.source = ev["event_ts"], ev["source"]
+        if ev["kind"] == "maintenance":
+            return [self.graph.maintenance_upsert(ev)]
+
+        for signal, value in ev["values"].items():
+            if ev["asset_id"] == ZONE_ID:
+                self.zone[signal] = value
+            else:
+                self.machines[ev["asset_id"]] = value
+            stmts.append(self.graph.reading_upsert(ev, signal, value))
+
+        # rule alerts: open when a rule starts firing, clear when it recovers
+        active = {a["rule"]: a for a in self.store.active_alerts()}
+        smoothed = {}
+        if "noise_db" in ev["values"]:
+            self.noise_window.append(ev["values"]["noise_db"])
+            smoothed["noise_db"] = sum(self.noise_window) / len(self.noise_window)
+        rules = evaluate_rules(ev, self.graph.thresholds(), ZONE_ID, MACHINES, smoothed)
+        for key, rule in rules.items():
+            if rule["firing"] and key not in active:
+                alert = {"id": f"AL-{self.store.next_alert_number():03d}", "rule": key, "asset": rule["asset"],
+                         "severity": rule["severity"], "description": rule["description"],
+                         "value": rule["value"], "createdAt": ev["event_ts"]}
+                self.store.open_alert(alert)
+                stmts.append(self.graph.alert_open(alert))
+                log.warning("ALERT    %s %s (value %s)", alert["id"], alert["description"], rule["value"])
+            elif rule["clear"] and key in active:
+                self.store.clear_alert(active[key]["alert_id"], ev["event_ts"])
+                stmts.append(self.graph.alert_clear(active[key]["alert_id"], ev["event_ts"]))
+                log.info("CLEARED  %s %s", active[key]["alert_id"], active[key]["description"])
+
+        active_now = self.store.active_alerts()
+        alerting_assets = {a["asset"] for a in active_now}
+        risk = zone_risk(active_now, self.machines.values(), ZONE_ID)
+
+        if ev["asset_id"] == ZONE_ID:
+            stmts.append(self.graph.zone_update(ev["values"], risk, ZONE_ID in alerting_assets, ev["event_ts"]))
+        else:
+            mid = ev["asset_id"]
+            k = self.kpis_for(mid)
+            end = datetime.now(timezone.utc)
+            start = iso(end - timedelta(minutes=KPI_WINDOW_MIN))
+            stmts += [
+                self.graph.machine_update(mid, self.machines[mid], k["utilization"], k["availability"],
+                                          mid in alerting_assets, ev["event_ts"]),
+                self.graph.kpi_upsert(mid, "utilization", k["utilization"], start, iso(end)),
+                self.graph.kpi_upsert(mid, "availability", k["availability"], start, iso(end)),
+                # machine status changes can move the zone risk too
+                ("MATCH (z:Zone {zoneId:$zone}) SET z.riskStatus=$risk", {"risk": risk}),
+            ]
+        overall = {"LOW": "OK", "MEDIUM": "WARNING", "HIGH": "CRITICAL"}[risk]
+        stmts.append(self.graph.workshop_update(overall))
+
+        if self.predictor is not None:
+            self.prediction = self.predictor.predict(self)
+            if self.prediction:
+                stmts.append(("MATCH (m:Machine {machineId:$mid}) SET m.predictedStatus=$p, m.downRiskPct=$r",
+                              {"mid": self.prediction["machineId"], "p": self.prediction["predictedStatus"],
+                               "r": self.prediction["downRiskPct"]}))
+        return stmts
+
+    # ---------------------------------------------------------------- read models for the API
+    def kpis_for(self, mid):
+        return machine_kpis(self.store.status_counts(mid, KPI_WINDOW_MIN))
+
+    def state(self):
+        if self.timestamp is None or any(v is None for v in self.zone.values()):
+            return None  # no complete zone reading yet
+        active = self.store.active_alerts()
+        machines = []
+        for mid, name in MACHINES.items():
+            k = self.kpis_for(mid)
+            machines.append({"machineId": mid, "name": name, "status": self.machines[mid],
+                             "utilization": k["utilization"], "availability": k["availability"]})
+        zone = {"zoneId": ZONE_ID, **self.zone, "riskStatus": zone_risk(active, self.machines.values(), ZONE_ID)}
+        return {"timestamp": self.timestamp, "source": self.source, "zone": zone,
+                "machines": machines, "activeAlerts": len(active)}

@@ -1,0 +1,76 @@
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: mosquitto
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    restart: unless-stopped
+
+  memgraph:
+    image: memgraph/memgraph-mage:latest
+    container_name: memgraph
+    ports:
+      - "7687:7687"   # Bolt (FastAPI connects here)
+      - "7444:7444"   # logs for Memgraph Lab
+    command: ["--log-level=WARNING", "--also-log-to-stderr"]
+    volumes:
+      - mg_data:/var/lib/memgraph
+    restart: unless-stopped
+
+  memgraph-lab:
+    image: memgraph/lab:latest
+    container_name: memgraph-lab
+    ports:
+      - "3000:3000"   # open http://localhost:3000 to see the graph
+    environment:
+      QUICK_CONNECT_MG_HOST: memgraph
+      QUICK_CONNECT_MG_PORT: 7687
+    depends_on:
+      - memgraph
+
+  backend:
+    build: ./backend
+    container_name: backend
+    ports:
+      - "8000:8000"   # REST API, Swagger UI at http://localhost:8000/docs
+    environment:
+      MQTT_HOST: mosquitto
+      MQTT_PORT: 1883
+      MEMGRAPH_HOST: memgraph
+      MEMGRAPH_PORT: 7687
+      SQLITE_PATH: /data/history.db
+    volumes:
+      - sqlite_data:/data
+    depends_on:
+      - mosquitto
+      - memgraph
+    restart: unless-stopped
+
+  dashboard:
+    build: ./dashboard
+    container_name: dashboard
+    ports:
+      - "8501:8501"   # open http://localhost:8501
+    environment:
+      API_BASE: http://backend:8000
+      DT_MODE: live
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  # Replay script as a container (not started by "docker compose up").
+  # Run it with:  docker compose run --rm simulator --interval 1 --start-row 360
+  simulator:
+    build: ./simulator
+    profiles: ["replay"]
+    environment:
+      MQTT_HOST: mosquitto
+      MQTT_PORT: 1883
+    depends_on:
+      - mosquitto
+
+volumes:
+  mg_data:
+  sqlite_data:
