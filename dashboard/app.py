@@ -48,7 +48,7 @@ if mode == "live":
 else:
     scenario = st.sidebar.radio("Mock scenario", ["normal", "alert", "lathe_down"],
                                 format_func={"normal": "Normal", "alert": "Alerts firing", "lathe_down": "Lathe DOWN"}.get)
-refresh = st.sidebar.slider("Refresh every (seconds)", 2, 10, 3)
+refresh = st.sidebar.slider("Refresh every (seconds)", 2, 10, 10)
 st_autorefresh(interval=refresh * 1000, key="tick")
 client = Client(mode, base, scenario)
 
