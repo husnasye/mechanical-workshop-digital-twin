@@ -124,7 +124,7 @@ class Twin:
                 self.graph.kpi_upsert(mid, "utilization", k["utilization"], start, iso(end)),
                 self.graph.kpi_upsert(mid, "availability", k["availability"], start, iso(end)),
                 # machine status changes can move the zone risk too
-                ("MATCH (z:Zone {zoneId:$zone}) SET z.riskStatus=$risk", {"risk": risk}),
+                ("MATCH (z:Zone {zoneId:$zone}) SET z.riskLevel=$risk", {"risk": risk}),
             ]
         overall = {"LOW": "OK", "MEDIUM": "WARNING", "HIGH": "CRITICAL"}[risk]
         stmts.append(self.graph.workshop_update(overall))

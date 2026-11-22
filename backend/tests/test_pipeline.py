@@ -174,3 +174,14 @@ def test_state_shape_matches_dashboard(tmp_path):
     assert set(s) == {"timestamp", "source", "zone", "machines", "activeAlerts"}
     assert set(s["zone"]) == {"zoneId", "temperature_c", "humidity_pct", "co2_ppm", "noise_db", "riskStatus"}
     assert set(s["machines"][0]) == {"machineId", "name", "status", "utilization", "availability"}
+
+
+def test_graph_writes_follow_ontology(tmp_path):
+    """Zone gets riskLevel (Ashfaq's ontology); each Reading stores its sensorId."""
+    tw = make_twin(tmp_path)
+    tw.handle(*env("2023-07-10T08:50:02Z"))
+    cypher = " ".join(q for q, _ in tw.graph.sent)
+    assert "z.riskLevel=" in cypher and "riskStatus" not in cypher
+    reading = [p for q, p in tw.graph.sent if q.startswith("MERGE (r:Reading")]
+    assert reading and all(p["sensor"] == "ENV-01" for p in reading)
+    assert "r.sensorId=$sensor" in cypher

@@ -24,7 +24,7 @@ ID_KEYS = {"Workshop": "workshopId", "Zone": "zoneId", "Machine": "machineId", "
 STATIC = [
     ("MERGE (w:Workshop {workshopId:$ws}) ON CREATE SET w.name='Mechanical Workshop', w.overallStatus='OK'", {}),
     ("MERGE (z:Zone {zoneId:$zone}) ON CREATE SET z.name='Machining zone', z.tempMax=$tempMax, z.co2Max=$co2Max, "
-     "z.noiseMax=$noiseMax, z.riskStatus='LOW', z.alertStatus=false", DEFAULT_THRESHOLDS),
+     "z.noiseMax=$noiseMax, z.riskLevel='LOW', z.alertStatus=false", DEFAULT_THRESHOLDS),
     ("MATCH (w:Workshop {workshopId:$ws}), (z:Zone {zoneId:$zone}) MERGE (w)-[:HAS_ZONE]->(z)", {}),
     ("MERGE (d:DataSource {sourceId:$src}) ON CREATE SET d.fileName='workshop_data.csv', d.dataOrigin='real+synthetic', "
      "d.replayRate='5 s'", {}),
@@ -111,7 +111,7 @@ class Graph:
     @staticmethod
     def zone_update(values, risk, alert_status, ts):
         props = {ZONE_PROP[k]: v for k, v in values.items() if k in ZONE_PROP}
-        return ("MATCH (z:Zone {zoneId:$zone}) SET z += $props, z.riskStatus=$risk, z.alertStatus=$alert, "
+        return ("MATCH (z:Zone {zoneId:$zone}) SET z += $props, z.riskLevel=$risk, z.alertStatus=$alert, "
                 "z.lastUpdate=$ts", {"props": props, "risk": risk, "alert": alert_status, "ts": ts})
 
     @staticmethod
@@ -129,7 +129,7 @@ class Graph:
         """Keep one Reading node per signal holding the latest value (full history is in SQLite)."""
         label, key = _asset(ev["asset_id"])
         return (f"MERGE (r:Reading {{readingId:$rid}}) SET r.signal=$signal, r.value=$value, r.unit=$unit, "
-                "r.eventTimestamp=$ets, r.sourceTimestamp=$sts, r.messageId=$msg, r.source=$source "
+                "r.eventTimestamp=$ets, r.sourceTimestamp=$sts, r.sensorId=$sensor, r.messageId=$msg, r.source=$source "
                 "WITH r MERGE (s:Sensor {sensorId:$sensor}) "  # MERGE: an unknown sensor id still gets a node
                 f"WITH r, s MATCH (a:{label} {{{key}:$asset}}) "
                 "MERGE (s)-[:PRODUCES]->(r) MERGE (r)-[:OBSERVES]->(a)",
