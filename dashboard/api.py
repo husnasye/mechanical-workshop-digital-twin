@@ -5,7 +5,7 @@ will use. When his real JSON arrives, compare it with the mock_* functions
 below and rename fields here (or in app.py) - nothing else needs to change.
 
 Assumed shapes
-  /api/state    {timestamp, source, zone:{zoneId,temperature_c,humidity_pct,co2_ppm,noise_db,riskStatus},
+  /api/state    {timestamp, source, zone:{zoneId,temperature_c,humidity_pct,co2_ppm,noise_db,riskLevel},
                  machines:[{machineId,name,status,utilization,availability}], activeAlerts}
   /api/history  {signal, points:[{timestamp,value}]}   (also lathe_status / drill_status)
   /api/alerts   [{id,severity,description,asset,createdAt,active}]
@@ -117,7 +117,7 @@ def mock_alerts(s):
 def mock_state(s):
     active = sum(1 for a in mock_alerts(s) if a["active"])
     risk = {"normal": "LOW", "alert": "HIGH", "lathe_down": "MEDIUM"}[s]
-    zone = {"zoneId": "zone1", **_zone_values(s), "riskStatus": risk}
+    zone = {"zoneId": "zone1", **_zone_values(s), "riskLevel": risk}
     return {"timestamp": _iso(_now()), "source": "synthetic", "zone": zone,
             "machines": _machines(s), "activeAlerts": active}
 
@@ -160,7 +160,7 @@ def mock_graph(s):
     z = _zone_values(s)
     nodes = [
         ("WS-01", "Workshop", {"name": "Mechanical Workshop"}),
-        ("zone1", "Zone", {"riskStatus": mock_state(s)["zone"]["riskStatus"], "temperature_c": z["temperature_c"]}),
+        ("zone1", "Zone", {"riskLevel": mock_state(s)["zone"]["riskLevel"], "temperature_c": z["temperature_c"]}),
         ("machine1", "Machine", {"type": "Lathe", "status": _machines(s)[0]["status"]}),
         ("machine2", "Machine", {"type": "Drill", "status": "RUNNING"}),
         ("ENV-01", "Sensor", {"sensorType": "environment"}),

@@ -172,7 +172,7 @@ def test_state_shape_matches_dashboard(tmp_path):
     tw.handle(*msg("noise", "zone1", {"noise_db": 60.0}, "2023-07-10T08:50:02Z"))
     s = tw.state()
     assert set(s) == {"timestamp", "source", "zone", "machines", "activeAlerts"}
-    assert set(s["zone"]) == {"zoneId", "temperature_c", "humidity_pct", "co2_ppm", "noise_db", "riskStatus"}
+    assert set(s["zone"]) == {"zoneId", "temperature_c", "humidity_pct", "co2_ppm", "noise_db", "riskLevel"}
     assert set(s["machines"][0]) == {"machineId", "name", "status", "utilization", "availability"}
 
 

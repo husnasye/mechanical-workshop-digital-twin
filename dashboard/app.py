@@ -138,7 +138,7 @@ with tab1:
         z = state["zone"]
         ts = pd.to_datetime(state["timestamp"], utc=True)
         age = (pd.Timestamp.now(tz="UTC") - ts).total_seconds()
-        st.markdown(f"**Zone:** {z['zoneId']} &nbsp; **Risk:** {z['riskStatus']} &nbsp; "
+        st.markdown(f"**Zone:** {z['zoneId']} &nbsp; **Risk:** {z['riskLevel']} &nbsp; "
                     f"**Data source:** {state['source']} &nbsp; **Last update:** {ts:%H:%M:%S} UTC ({age:.0f} s ago)")
         cols = st.columns(4)
         for col, (sig, lim) in zip(cols, LIMITS.items()):

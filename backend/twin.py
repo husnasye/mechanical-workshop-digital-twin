@@ -150,6 +150,6 @@ class Twin:
             k = self.kpis_for(mid)
             machines.append({"machineId": mid, "name": name, "status": self.machines[mid],
                              "utilization": k["utilization"], "availability": k["availability"]})
-        zone = {"zoneId": ZONE_ID, **self.zone, "riskStatus": zone_risk(active, self.machines.values(), ZONE_ID)}
+        zone = {"zoneId": ZONE_ID, **self.zone, "riskLevel": zone_risk(active, self.machines.values(), ZONE_ID)}
         return {"timestamp": self.timestamp, "source": self.source, "zone": zone,
                 "machines": machines, "activeAlerts": len(active)}
