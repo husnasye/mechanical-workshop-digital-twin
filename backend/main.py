@@ -39,6 +39,7 @@ app = FastAPI(title="Workshop Digital Twin API", version="1.0", lifespan=lifespa
 @app.get("/health", tags=["system"])
 def health():
     return {"mqttConnected": consumer.connected, "memgraphSeeded": graph.seeded, "queueBacklog": consumer.backlog(),
+            "live": twin.live(), "runStartedAt": twin.run_started,
             "processed": twin.stats, "stored": storage.counts()}
 
 
@@ -52,7 +53,7 @@ def state():
 
 @app.get("/api/history", tags=["twin"])
 def history(signal: str = Query(..., enum=SIGNALS), minutes: int = Query(30, ge=1, le=1440)):
-    rows = storage.history(signal, minutes)
+    rows = storage.history(signal, minutes, since=twin.run_started)  # current run only
     return {"signal": signal, "points": [
         {"timestamp": r["event_ts"], "sourceTimestamp": r["source_ts"],
          "value": r["value"] if r["value_text"] is None else r["value_text"]} for r in rows]}
@@ -62,7 +63,7 @@ def history(signal: str = Query(..., enum=SIGNALS), minutes: int = Query(30, ge=
 def alerts(limit: int = Query(100, ge=1, le=1000)):
     return [{"id": a["alert_id"], "severity": a["severity"], "description": a["description"], "asset": a["asset"],
              "createdAt": a["created_at"], "clearedAt": a["cleared_at"], "active": bool(a["active"]),
-             "triggerValue": a["trigger_value"]} for a in storage.recent_alerts(limit)]
+             "triggerValue": a["trigger_value"]} for a in storage.recent_alerts(limit, since=twin.run_started)]
 
 
 @app.get("/api/kpis", tags=["analytics"])

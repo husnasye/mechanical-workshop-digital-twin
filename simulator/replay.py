@@ -10,6 +10,8 @@ import pandas as pd
 import paho.mqtt.client as mqtt
 
 BASE = "workshop"
+# One tick = one CSV row. The CSV is sampled every 10 s, so the replay sends a tick every 10 s.
+TICK_SECONDS = 10
 MACHINES = {"lathe": ("machine1", "lathe_status", "LATHE-STAT-01"),
             "drill": ("machine2", "drill_status", "DRILL-STAT-01")}
 
@@ -64,7 +66,6 @@ def main():
     ap.add_argument("--maintenance", default="maintenance_events.csv")
     ap.add_argument("--host", default=os.getenv("MQTT_HOST", "localhost"))
     ap.add_argument("--port", type=int, default=int(os.getenv("MQTT_PORT", 1883)))
-    ap.add_argument("--interval", type=float, default=5.0, help="seconds between rows (default 5)")
     ap.add_argument("--start-row", type=int, default=0)
     ap.add_argument("--loop", action="store_true", help="start again when the CSV ends")
     ap.add_argument("--fail", choices=list(MACHINES), help="force this machine DOWN (demo what-if)")
@@ -80,7 +81,8 @@ def main():
 
     client = connect(a.host, a.port, client_id=f"replay-{os.getpid()}")
     seq, tick, row = 0, 0, a.start_row
-    print(f"[replay] {len(df)} rows, starting at row {row}, one row every {a.interval}s")
+    print(f"[replay] {len(df)} rows, starting at row {row}, one tick every {TICK_SECONDS}s")
+    next_send = time.monotonic()  # fixed schedule: ticks go out exactly every 10 s, no drift
 
     try:
         while True:
@@ -131,7 +133,8 @@ def main():
 
             row += 1
             tick += 1
-            time.sleep(a.interval)
+            next_send += TICK_SECONDS
+            time.sleep(max(0.0, next_send - time.monotonic()))
     except KeyboardInterrupt:
         print("\n[replay] stopped by user")
     finally:

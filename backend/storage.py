@@ -73,6 +73,11 @@ def since_iso(minutes):
     return iso(datetime.now(timezone.utc) - timedelta(minutes=minutes))
 
 
+def _later(a, b):
+    """The later of two ISO timestamps (b may be None). Same format, so string order = time order."""
+    return max(a, b) if b else a
+
+
 class Storage:
     def __init__(self, path):
         if os.path.dirname(path):
@@ -144,17 +149,18 @@ class Storage:
     def active_alerts(self):
         return self._q("SELECT * FROM alerts WHERE active=1")
 
-    def recent_alerts(self, limit=100):
-        return self._q("SELECT * FROM alerts ORDER BY created_at DESC LIMIT ?", (limit,))
+    def recent_alerts(self, limit=100, since=None):
+        return self._q("SELECT * FROM alerts WHERE created_at>=? ORDER BY created_at DESC LIMIT ?",
+                       (since or "", limit))
 
-    def history(self, signal, minutes):
+    def history(self, signal, minutes, since=None):
         return self._q("SELECT event_ts, source_ts, value, value_text FROM readings "
-                       "WHERE signal=? AND event_ts>=? ORDER BY event_ts", (signal, since_iso(minutes)))
+                       "WHERE signal=? AND event_ts>=? ORDER BY event_ts", (signal, _later(since_iso(minutes), since)))
 
-    def status_counts(self, machine_id, minutes):
+    def status_counts(self, machine_id, minutes, since=None):
         rows = self._q("SELECT value_text AS status, COUNT(*) AS n FROM readings "
                        "WHERE signal=? AND event_ts>=? GROUP BY value_text",
-                       (STATUS_SIGNAL[machine_id], since_iso(minutes)))
+                       (STATUS_SIGNAL[machine_id], _later(since_iso(minutes), since)))
         return {r["status"]: r["n"] for r in rows}
 
     def latest(self):

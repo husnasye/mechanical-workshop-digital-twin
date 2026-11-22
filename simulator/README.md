@@ -1,6 +1,6 @@
 # Simulator (replay.py)
 
-Replays `workshop_data.csv` as live MQTT telemetry, one row every 5 s by default.
+Replays `workshop_data.csv` as live MQTT telemetry: one tick (one CSV row) every 10 s, the same spacing as the CSV.
 
 ## Run
 ```bash
@@ -18,9 +18,8 @@ docker exec -it mosquitto mosquitto_sub -t 'workshop/#' -v
 ## Useful options
 | Option | What it does |
 |---|---|
-| `--interval 1` | 1 row per second (faster testing) |
-| `--start-row 360` | jump to just before the lathe failure (row ~381) |
-| `--fail lathe --fail-at 10 --fail-for 12` | force the lathe DOWN on demand (what-if demo) |
+| `--start-row 378` | start 30 s before the lathe failure (row 381) |
+| `--fail lathe --fail-at 3 --fail-for 6` | force the lathe DOWN from tick 3 for 6 ticks (what-if demo) |
 | `--loop` | restart at the top when the CSV ends |
 | `--host mosquitto` | broker hostname if running inside Docker |
 | `--quiet` | don't print every message |

@@ -55,13 +55,12 @@ services:
       - "8501:8501"   # open http://localhost:8501
     environment:
       API_BASE: http://backend:8000
-      DT_MODE: live
     depends_on:
       - backend
     restart: unless-stopped
 
   # Replay script as a container (not started by "docker compose up").
-  # Run it with:  docker compose run --rm simulator --interval 1 --start-row 360
+  # Run it with:  docker compose run --rm simulator --start-row 378
   simulator:
     build: ./simulator
     profiles: ["replay"]

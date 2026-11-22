@@ -171,9 +171,11 @@ def test_state_shape_matches_dashboard(tmp_path):
     tw.handle(*env("2023-07-10T08:50:02Z"))
     tw.handle(*msg("noise", "zone1", {"noise_db": 60.0}, "2023-07-10T08:50:02Z"))
     s = tw.state()
-    assert set(s) == {"timestamp", "source", "zone", "machines", "activeAlerts"}
+    assert set(s) == {"timestamp", "source", "live", "lastMessageAgeSec", "runStartedAt", "zone", "machines",
+                      "activeAlerts"}
     assert set(s["zone"]) == {"zoneId", "temperature_c", "humidity_pct", "co2_ppm", "noise_db", "riskLevel"}
-    assert set(s["machines"][0]) == {"machineId", "name", "status", "utilization", "availability"}
+    assert set(s["machines"][0]) == {"machineId", "name", "status", "availabilityState", "inMaintenance",
+                                     "utilization", "availability"}
 
 
 def test_graph_writes_follow_ontology(tmp_path):
@@ -185,3 +187,33 @@ def test_graph_writes_follow_ontology(tmp_path):
     reading = [p for q, p in tw.graph.sent if q.startswith("MERGE (r:Reading")]
     assert reading and all(p["sensor"] == "ENV-01" for p in reading)
     assert "r.sensorId=$sensor" in cypher
+
+
+def test_availability_state():
+    from twin import availability_state
+    assert availability_state("IDLE") == "Available"
+    assert availability_state("RUNNING") == "Occupied"
+    assert availability_state("DOWN") == "Out of service"
+    assert availability_state("RUNNING", in_maintenance=True) == "Out of service"
+
+
+def test_live_flag_and_new_run_after_gap(tmp_path, monkeypatch):
+    """After a quiet gap the twin is not live; the next message starts a new run that closes
+    old alerts and resets the KPIs."""
+    import twin as twin_module
+    clock = [2_000_000.0]
+    monkeypatch.setattr(twin_module.time, "time", lambda: clock[0])
+    tw = make_twin(tmp_path)
+    tw.handle(*env("2023-07-10T10:00:00Z", temperature_c=31.0))
+    tw.handle(*msg("noise", "zone1", {"noise_db": 60.0}, "2023-07-10T10:00:00Z"))
+    tw.handle(*msg("status", "machine1", {"status": "DOWN"}, "2023-07-10T10:00:00Z"))
+    s = tw.state()
+    assert s["live"] is True and s["activeAlerts"] == 2
+    assert s["machines"][0]["availabilityState"] == "Out of service"
+    clock[0] += 30                      # replay stopped for longer than LIVE_TIMEOUT_SEC
+    assert tw.state()["live"] is False
+    tw.handle(*msg("status", "machine1", {"status": "RUNNING"}, "2023-07-10T11:00:00Z"))
+    s = tw.state()
+    assert s["live"] is True and s["activeAlerts"] == 0
+    assert s["machines"][0]["availabilityState"] == "Occupied"
+    assert tw.kpis_for("machine1")["samples"] == 1   # only the new run counts

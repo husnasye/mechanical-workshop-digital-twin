@@ -6,14 +6,16 @@ import streamlit as st
 import streamlit.components.v1 as components
 from plotly.subplots import make_subplots
 from pyvis.network import Network
-from streamlit_autorefresh import st_autorefresh
 
-from api import API_BASE, DEFAULT_MODE, STATUS_SIGNAL, ApiError, Client
+from api import API_BASE, STATUS_SIGNAL, ApiError, Client
 
 st.set_page_config(page_title="Workshop Digital Twin", layout="wide")
 
-GREEN, AMBER, RED = "#2e7d5b", "#d98f00", "#c0392b"
+GREEN, AMBER, RED, BLUE, GREY = "#2e7d5b", "#d98f00", "#c0392b", "#3d6fb6", "#8d99a6"
 STATUS_COLORS = {"RUNNING": GREEN, "IDLE": AMBER, "DOWN": RED}
+# can the machine be used right now? (computed by the backend from status + maintenance)
+AVAIL_COLORS = {"Available": GREEN, "Occupied": BLUE, "Out of service": RED, "No data": GREY}
+MACHINE_NAMES = {"machine1": "Lathe", "machine2": "Drill"}
 # warn = amber from here, limit = red above it (demo thresholds, not compliance limits).
 # Humidity has no alert rule in the project, so it stays informational.
 LIMITS = {
@@ -38,20 +40,29 @@ st.markdown("""<style>
 .chip i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px}
 </style>""", unsafe_allow_html=True)
 
-# ------------------------------------------------------------------ sidebar
-st.sidebar.header("Settings")
-mode = st.sidebar.radio("Data source", ["mock", "live"], index=0 if DEFAULT_MODE == "mock" else 1,
-                        help="Mock uses made-up data. Live calls the FastAPI server.")
-base = API_BASE
-scenario = "normal"
-if mode == "live":
-    base = st.sidebar.text_input("API address", API_BASE)
-else:
-    scenario = st.sidebar.radio("Mock scenario", ["normal", "alert", "lathe_down"],
-                                format_func={"normal": "Normal", "alert": "Alerts firing", "lathe_down": "Lathe DOWN"}.get)
-refresh = st.sidebar.slider("Refresh every (seconds)", 2, 10, 10)
-st_autorefresh(interval=refresh * 1000, key="tick")
-client = Client(mode, base, scenario)
+# ------------------------------------------------------------------ refresh
+# Always live: the dashboard reads the FastAPI server at API_BASE (set in docker-compose).
+# The replay sends one tick (one CSV row) every 10 s. Instead of redrawing on a blind timer,
+# a tiny watcher asks the API once a second whether a new tick has arrived and redraws the
+# page as soon as it has, so the dashboard changes right after each tick is sent.
+TICK_SECONDS = 10
+WATCH_SECONDS = 1
+client = Client("live", API_BASE)
+
+
+def tick_key(s):
+    """What identifies the data currently shown: the latest message time and whether it is live."""
+    return (s.get("timestamp"), bool(s.get("live"))) if s else None
+
+
+@st.fragment(run_every=WATCH_SECONDS)
+def watch_for_new_tick():
+    try:
+        latest = tick_key(client.state())
+    except ApiError:
+        latest = None
+    if latest != st.session_state.get("shown"):
+        st.rerun(scope="app")  # new tick (or live/idle change): redraw everything
 
 
 def safe(fn, *args):
@@ -142,6 +153,10 @@ def status_chart(machines):
     return fig
 
 
+def avail_badge(state):
+    return f'<span class="badge" style="background:{AVAIL_COLORS.get(state, GREY)}">{state}</span>'
+
+
 def machine_status(props):
     # live graph (ontology) uses operationalStatus; the mock data uses status
     return props.get("operationalStatus") or props.get("status")
@@ -186,58 +201,81 @@ def graph_html(g):
 
 # ------------------------------------------------------------------ header
 st.title("Mechanical Workshop Digital Twin")
-if mode == "mock":
-    st.info("Showing mock data. Switch Data source to live in the sidebar once the API is running.")
+st.caption(f"Live data: the replay sends one reading every {TICK_SECONDS} seconds and the page "
+           "updates as soon as it arrives.")
+
+try:
+    state = client.state()
+except ApiError:
+    state = None  # backend has no telemetry yet (or is unreachable)
+st.session_state["shown"] = tick_key(state)
+watch_for_new_tick()
+LIVE = bool(state and state.get("live"))
+if not LIVE:
+    # no live data: show zeros and no alerts until the replay script sends data again
+    st.warning("Waiting for live data. Start the replay script and the dashboard will pick it up "
+               "as soon as the first reading arrives.")
+    state = {"zone": {"zoneId": "zone1", **{k: 0 for k in LIMITS}, "riskLevel": "-"}, "source": "-",
+             "timestamp": None, "activeAlerts": 0,
+             "machines": [{"machineId": mid, "name": name, "status": "-", "availabilityState": "No data",
+                           "utilization": 0.0, "availability": 0.0} for mid, name in MACHINE_NAMES.items()]}
 
 tab1, tab2, tab3, tab4 = st.tabs(["Overview", "Machine Analytics", "Knowledge Graph", "Alerts & History"])
 
 # ------------------------------------------------------------------ overview
 with tab1:
-    state = safe(client.state)
-    if state:
-        z = state["zone"]
+    z = state["zone"]
+    if LIVE:
         ts = pd.to_datetime(state["timestamp"], utc=True)
-        age = (pd.Timestamp.now(tz="UTC") - ts).total_seconds()
-        st.markdown(f"**Zone:** {z['zoneId']} &nbsp; **Risk:** {z['riskLevel']} &nbsp; "
-                    f"**Data source:** {state['source']} &nbsp; **Last update:** {ts:%H:%M:%S} UTC ({age:.0f} s ago)")
-        cols = st.columns(4)
-        for col, (sig, lim) in zip(cols, LIMITS.items()):
-            with col:
-                v = z[sig]
-                sub = f"alert above {lim['limit']} {lim['unit']}" if lim["limit"] else "no alert rule"
-                card(lim["label"], f"{v:g} {lim['unit']}", sub, level_color(v, lim))
-        cols = st.columns(3)
-        for col, m in zip(cols, state["machines"]):
-            with col:
-                st.markdown(f'<div class="card" style="{card_style(STATUS_COLORS.get(m["status"], "#888"))}">'
-                            f'<div class="k">{m["name"]}</div><div class="v">{badge(m["status"])}</div>'
-                            f'<div class="s">Utilization {m["utilization"]:.1f}% · Availability {m["availability"]:.1f}%</div></div>',
-                            unsafe_allow_html=True)
-        with cols[2]:
-            n = state["activeAlerts"]
-            card("Active alerts", n, "all clear" if n == 0 else "see Alerts & History", RED if n else GREEN)
-        st.caption("Thresholds are demo values for this project, not regulatory limits. "
-                   "Amber = approaching the limit, red = alert rule triggered.")
+        updated = f"{ts:%H:%M:%S} UTC ({state.get('lastMessageAgeSec') or 0:.0f} s ago)"
+    else:
+        updated = "no live data"
+    st.markdown(f"**Zone:** {z['zoneId']} &nbsp; **Risk:** {z['riskLevel']} &nbsp; "
+                f"**Data source:** {state['source']} &nbsp; **Last update:** {updated}")
+    cols = st.columns(4)
+    for col, (sig, lim) in zip(cols, LIMITS.items()):
+        with col:
+            v = z[sig]
+            sub = f"alert above {lim['limit']} {lim['unit']}" if lim["limit"] else "no alert rule"
+            card(lim["label"], f"{v:g} {lim['unit']}", sub, level_color(v, lim) if LIVE else GREY)
+    cols = st.columns(3)
+    for col, m in zip(cols, state["machines"]):
+        with col:
+            av = m["availabilityState"]
+            st.markdown(f'<div class="card" style="{card_style(AVAIL_COLORS.get(av, GREY))}">'
+                        f'<div class="k">{m["name"]}{" · " + m["status"].lower() if LIVE else ""}</div>'
+                        f'<div class="v">{avail_badge(av)}</div>'
+                        f'<div class="s">Utilization {m["utilization"]:.1f}% · Uptime {m["availability"]:.1f}%</div></div>',
+                        unsafe_allow_html=True)
+    with cols[2]:
+        n = state["activeAlerts"]
+        card("Active alerts", n, "all clear" if n == 0 else "see Alerts & History",
+             RED if n else (GREEN if LIVE else GREY))
+    st.caption("Thresholds are demo values for this project, not regulatory limits. "
+               "Amber = approaching the limit, red = alert rule triggered. "
+               "Available = idle and free to use, Occupied = running, Out of service = down or in maintenance.")
 
 # ------------------------------------------------------------------ machine analytics
 with tab2:
-    kp = safe(client.kpis)
-    state = safe(client.state)
-    if kp and state:
-        st.caption(f"KPIs over the last {kp.get('windowMinutes', '?')} minutes")
-        status = {m["machineId"]: m["status"] for m in state["machines"]}
-        for m in kp["machines"]:
-            st.markdown(f"#### {m['name']} &nbsp; {badge(status.get(m['machineId'], 'UNKNOWN'))}", unsafe_allow_html=True)
-            c1, c2 = st.columns(2)
-            c1.plotly_chart(gauge("Utilization", m["utilization"]), key=f"u-{m['machineId']}")
-            c2.plotly_chart(gauge("Availability", m["availability"]), key=f"a-{m['machineId']}")
-        st.markdown("#### Status over time (last 60 minutes)")
-        fig = status_chart(state["machines"])
-        if fig is not None:
-            st.plotly_chart(fig, key="timeline")
-            st.caption("The line steps down when a machine goes IDLE or DOWN. Red shading marks DOWN periods.")
-        else:
-            st.info("Status history is not available from the API yet.")
+    st.caption("Utilization = running time / scheduled time. Uptime (availability KPI) = time not DOWN / "
+               "scheduled time. Both over the last 60 minutes of the current run.")
+    for m in state["machines"]:
+        av = m["availabilityState"]
+        st.markdown(f"#### {m['name']} &nbsp; {avail_badge(av)}", unsafe_allow_html=True)
+        c1, c2, c3 = st.columns(3)
+        c1.plotly_chart(gauge("Utilization", m["utilization"]), key=f"u-{m['machineId']}")
+        with c2:
+            st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+            card("Availability now", av, f"machine is {m['status'].lower()}" if LIVE else "waiting for data",
+                 AVAIL_COLORS.get(av, GREY))
+        c3.plotly_chart(gauge("Uptime", m["availability"]), key=f"a-{m['machineId']}")
+    st.markdown("#### Status over time (last 60 minutes)")
+    fig = status_chart(state["machines"]) if LIVE else None
+    if fig is not None:
+        st.plotly_chart(fig, key="timeline")
+        st.caption("The line steps down when a machine goes IDLE or DOWN. Red shading marks DOWN periods.")
+    else:
+        st.info("No status history for the current run yet.")
 
 # ------------------------------------------------------------------ knowledge graph
 with tab3:
@@ -263,10 +301,10 @@ with tab4:
     minutes = st.select_slider("History window (minutes)", options=[10, 30, 60], value=30)
     cols = st.columns(2)
     for i, (sig, lim) in enumerate(LIMITS.items()):
-        data = safe(client.history, sig, minutes)
+        data = safe(client.history, sig, minutes) if LIVE else {"points": []}
         if not data:
             continue
-        df = pd.DataFrame(data["points"])
+        df = pd.DataFrame(data["points"], columns=["timestamp", "value"])
         df["time"] = pd.to_datetime(df["timestamp"], utc=True)
         fig = px.line(df, x="time", y="value", title=f"{lim['label']} ({lim['unit']})")
         fig.update_traces(line_color="#33475b")
@@ -275,7 +313,7 @@ with tab4:
         fig.update_layout(height=280, margin=dict(l=10, r=10, t=45, b=10), xaxis_title=None, yaxis_title=None)
         cols[i % 2].plotly_chart(fig, key=f"h-{sig}")
     st.markdown("#### Alert log")
-    al = safe(client.alerts)
+    al = safe(client.alerts) if LIVE else []
     if al:
         df = pd.DataFrame(al).sort_values("createdAt", ascending=False)
         df["status"] = df["active"].map({True: "ACTIVE", False: "cleared"})

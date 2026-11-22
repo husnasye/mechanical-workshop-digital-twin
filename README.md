@@ -25,9 +25,9 @@ simulator (replay.py) --MQTT--> Mosquitto --MQTT--> backend (FastAPI) --Bolt--> 
    ```
 4. Wait about 40 seconds for Memgraph to finish starting, then stream the data:
    ```bash
-   docker compose run --rm simulator --interval 1 --start-row 360
+   docker compose run --rm simulator --start-row 378
    ```
-   Press Ctrl+C to stop. `--start-row 360` jumps to just before the lathe failure.
+   One reading is sent every 10 s. Press Ctrl+C to stop. `--start-row 378` starts 30 s before the lathe failure.
 
 ## Where to look
 
@@ -45,14 +45,13 @@ Useful Cypher in Memgraph Lab: `MATCH (n)-[r]->(m) RETURN n, r, m;`
 
 | Option | What it does |
 |---|---|
-| `--interval 1` | one CSV row per second (default 5) |
-| `--start-row 360` | start just before the lathe failure |
-| `--fail lathe --fail-at 10 --fail-for 12` | force the lathe DOWN on demand |
+| `--start-row 378` | start 30 s before the lathe failure (row 381; it recovers about 10 min later) |
+| `--fail lathe --fail-at 3 --fail-for 6` | force the lathe DOWN from tick 3 for 6 ticks (30 s in, back after 60 s) |
 | `--loop` | start again when the CSV ends |
 | `--quiet` | do not print every message |
 
 You can also run it with Python instead of Docker:
-`pip install -r simulator/requirements.txt`, then `cd simulator` and `python replay.py --interval 1`.
+`pip install -r simulator/requirements.txt`, then `cd simulator` and `python replay.py`.
 
 ## Useful commands
 

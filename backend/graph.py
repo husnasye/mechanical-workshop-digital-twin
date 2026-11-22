@@ -30,8 +30,8 @@ STATIC = [
     ("MERGE (z:Zone {zoneId:$zone}) ON CREATE SET z.name='Machining zone', z.tempMax=$tempMax, z.co2Max=$co2Max, "
      "z.noiseMax=$noiseMax, z.riskLevel='LOW', z.alertStatus=false", DEFAULT_THRESHOLDS),
     ("MATCH (w:Workshop {workshopId:$ws}), (z:Zone {zoneId:$zone}) MERGE (w)-[:HAS_ZONE]->(z)", {}),
-    ("MERGE (d:DataSource {sourceId:$src}) ON CREATE SET d.fileName='workshop_data.csv', d.dataOrigin='real+synthetic', "
-     "d.replayRate='5 s'", {}),
+    ("MERGE (d:DataSource {sourceId:$src}) ON CREATE SET d.fileName='workshop_data.csv', d.dataOrigin='real+synthetic' "
+     "SET d.replayRate='10 s'", {}),
     ("MERGE (s:Sensor {sensorId:'ENV-01'}) ON CREATE SET s.sensorType='environment', s.model='SHT31 + SCD41'", {}),
     ("MERGE (s:Sensor {sensorId:'NOISE-01'}) ON CREATE SET s.sensorType='noise', s.model='Class 2 sound level meter'", {}),
     ("MATCH (z:Zone {zoneId:$zone}), (s:Sensor) WHERE s.sensorId IN ['ENV-01','NOISE-01'] MERGE (z)-[:HAS_SENSOR]->(s)", {}),

@@ -19,6 +19,11 @@ DEDUP_SECONDS = int(os.getenv("DEDUP_SECONDS", "60"))
 # KPIs are computed over this rolling window of live (replay) time.
 KPI_WINDOW_MIN = int(os.getenv("KPI_WINDOW_MIN", "60"))
 
+# The twin counts as "live" while messages keep arriving. A gap longer than this ends
+# the current run; the next message starts a new run (fresh KPIs, history and alerts).
+# The replay sends a row every 10 s, so 25 s allows one late row before declaring it stopped.
+LIVE_TIMEOUT_SEC = int(os.getenv("LIVE_TIMEOUT_SEC", "25"))
+
 WORKSHOP_ID = "WS-01"
 ZONE_ID = "zone1"
 MACHINES = {"machine1": "Lathe", "machine2": "Drill"}
