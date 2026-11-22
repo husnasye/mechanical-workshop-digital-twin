@@ -8,6 +8,10 @@ retries on the next event.
 import logging
 import time
 
+# The graph database is Memgraph, not Neo4j. Memgraph speaks the Bolt protocol and
+# Cypher, so the official `neo4j` Python package is used only as a Bolt client driver
+# (Memgraph's documentation recommends it). It connects to the Memgraph container at
+# MEMGRAPH_URI (bolt://memgraph:7687); no Neo4j server is installed or used.
 from neo4j import GraphDatabase
 
 from config import DATA_SOURCE_ID, DEFAULT_SENSORS, DEFAULT_THRESHOLDS, MACHINES, WORKSHOP_ID, ZONE_ID
