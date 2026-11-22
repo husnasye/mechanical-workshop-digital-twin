@@ -4,6 +4,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 import streamlit.components.v1 as components
+from plotly.subplots import make_subplots
 from pyvis.network import Network
 from streamlit_autorefresh import st_autorefresh
 
@@ -29,7 +30,7 @@ TIERS = {"Workshop": 0, "Zone": 1, "Machine": 2, "Sensor": 2, "DataSource": 2,
          "Reading": 3, "Alert": 3, "MaintenanceEvent": 3, "KPI": 3}
 
 st.markdown("""<style>
-.card{padding:14px 16px;border-radius:6px;border-left:6px solid var(--c);background:rgba(128,128,128,.10);margin-bottom:8px}
+.card{padding:14px 16px;border-radius:6px;border:1px solid var(--bd,transparent);border-left:6px solid var(--c);background:var(--bg,rgba(128,128,128,.10));margin-bottom:8px}
 .card .k{font-size:.85rem;opacity:.75}.card .v{font-size:2rem;font-weight:700;line-height:1.25}
 .card .s{font-size:.82rem;opacity:.7}
 .badge{display:inline-block;padding:2px 12px;border-radius:999px;color:#fff;font-weight:600;font-size:1.1rem}
@@ -61,6 +62,17 @@ def safe(fn, *args):
         return None
 
 
+def tint(hex_color, alpha):
+    h = hex_color.lstrip("#")
+    r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+    return f"rgba({r},{g},{b},{alpha})"
+
+
+def card_style(color):
+    # whole card gets a faint wash of its status color (green / amber / red)
+    return f"--c:{color};--bg:{tint(color, .16)};--bd:{tint(color, .35)}"
+
+
 def level_color(value, lim):
     if lim["limit"] is None:
         return GREEN
@@ -68,7 +80,7 @@ def level_color(value, lim):
 
 
 def card(label, value, sub="", color=GREEN):
-    st.markdown(f'<div class="card" style="--c:{color}"><div class="k">{label}</div>'
+    st.markdown(f'<div class="card" style="{card_style(color)}"><div class="k">{label}</div>'
                 f'<div class="v">{value}</div><div class="s">{sub}</div></div>', unsafe_allow_html=True)
 
 
@@ -77,51 +89,93 @@ def badge(text):
 
 
 def gauge(title, value):
+    value = max(0.0, min(100.0, float(value)))  # keep the dial inside 0-100
     fig = go.Figure(go.Indicator(
-        mode="gauge+number", value=value, number={"suffix": " %"}, title={"text": title},
-        gauge={"axis": {"range": [0, 100]}, "bar": {"color": "#33475b"},
+        mode="gauge", value=round(value, 1), domain={"x": [0, 1], "y": [0, 1]},
+        title={"text": title, "font": {"size": 16}},
+        gauge={"axis": {"range": [0, 100], "tickvals": [0, 50, 100]}, "bar": {"color": "#33475b"},
                "steps": [{"range": [0, 50], "color": "#f0c4bf"}, {"range": [50, 80], "color": "#f5e2b3"},
                          {"range": [80, 100], "color": "#c5e3d4"}]}))
-    fig.update_layout(height=210, margin=dict(l=20, r=20, t=50, b=10))
+    # the number is a separate label centred under the arc, so it can never sit behind the dial
+    fig.add_annotation(x=0.5, y=0.12, xref="paper", yref="paper", text=f"<b>{value:.1f}%</b>",
+                       showarrow=False, font={"size": 34}, xanchor="center", yanchor="middle")
+    fig.update_layout(height=230, margin=dict(l=30, r=30, t=70, b=15))
     return fig
 
 
-def status_segments(machines):
-    rows = []
-    for m in machines:
+LEVEL = {"DOWN": 0, "IDLE": 1, "RUNNING": 2}
+
+
+def status_chart(machines):
+    """One step line per machine: the line drops when it goes IDLE or DOWN. DOWN periods are shaded red."""
+    fig = make_subplots(rows=len(machines), cols=1, shared_xaxes=True, vertical_spacing=0.2,
+                        subplot_titles=[m["name"] for m in machines])
+    drawn = False
+    for i, m in enumerate(machines, start=1):
         data = safe(client.history, STATUS_SIGNAL[m["machineId"]], 60)
         if not data or len(data["points"]) < 2:
             continue
         df = pd.DataFrame(data["points"])
         df["t"] = pd.to_datetime(df["timestamp"], utc=True)
-        df["grp"] = (df["value"] != df["value"].shift()).cumsum()
-        seg = df.groupby("grp").agg(Start=("t", "first"), Status=("value", "first"))
+        df["value"] = df["value"].astype(str).str.upper()
+        df["lvl"] = df["value"].map(LEVEL)
+        df = df.dropna(subset=["lvl"])
+        if len(df) < 2:
+            continue
+        drawn = True
         step = df["t"].iloc[-1] - df["t"].iloc[-2]
-        seg["End"] = seg["Start"].shift(-1).fillna(df["t"].iloc[-1] + step)
-        seg["Machine"] = m["name"]
-        rows.append(seg)
-    return pd.concat(rows) if rows else None
+        fig.add_trace(go.Scatter(x=df["t"], y=df["lvl"], mode="lines", showlegend=False,
+                                 line=dict(shape="hv", width=3, color="#33475b"), customdata=df["value"],
+                                 hovertemplate="%{customdata}<br>%{x|%H:%M:%S}<extra></extra>"), row=i, col=1)
+        down = df["value"].eq("DOWN")
+        for _, part in df[down].groupby((down != down.shift()).cumsum()[down]):
+            fig.add_vrect(x0=part["t"].iloc[0], x1=part["t"].iloc[-1] + step, fillcolor=RED,
+                          opacity=0.15, line_width=0, row=i, col=1)
+        last = df.iloc[-1]
+        fig.add_trace(go.Scatter(x=[last["t"]], y=[last["lvl"]], mode="markers", showlegend=False,
+                                 marker=dict(size=13, color=STATUS_COLORS[last["value"]]),
+                                 hovertemplate=f"now: {last['value']}<extra></extra>"), row=i, col=1)
+    if not drawn:
+        return None
+    fig.update_yaxes(tickvals=[0, 1, 2], ticktext=["DOWN", "IDLE", "RUNNING"], range=[-0.3, 2.3])
+    fig.update_layout(height=170 * len(machines) + 40, margin=dict(l=10, r=10, t=30, b=10))
+    return fig
+
+
+def node_color(n):
+    props = n.get("properties") or {}
+    if n["label"] == "Machine" and props.get("status") in STATUS_COLORS:
+        return STATUS_COLORS[props["status"]]  # machines follow their live status
+    if n.get("alertActive"):
+        return RED
+    return NODE_COLORS.get(n["label"], "#999")
 
 
 def graph_html(g):
-    net = Network(height="560px", width="100%", directed=True, cdn_resources="in_line",
+    net = Network(height="520px", width="100%", directed=True, cdn_resources="in_line",
                   bgcolor="#f7f7f5", font_color="#222")
     tiers = {}
     for n in g["nodes"]:
         tiers.setdefault(TIERS.get(n["label"], 3), []).append(n)
     for tier, items in tiers.items():
         for i, n in enumerate(items):
+            props = n.get("properties") or {}
             hot = n.get("alertActive")
-            tip = n["label"] + "\n" + "\n".join(f"{k}: {v}" for k, v in (n.get("properties") or {}).items())
-            net.add_node(n["id"], label=n["id"], title=tip, shape="dot", size=22 if tier < 3 else 16,
-                         color=RED if hot else NODE_COLORS.get(n["label"], "#999"),
-                         x=(i - (len(items) - 1) / 2) * 130, y=tier * 150, physics=False,
-                         borderWidth=4 if hot else 1)
+            text = n["id"] + (f"\n{props['status']}" if n["label"] == "Machine" and props.get("status") else "")
+            tip = n["label"] + "\n" + "\n".join(f"{k}: {v}" for k, v in props.items())
+            net.add_node(n["id"], label=text, title=tip, shape="dot", size=22 if tier < 3 else 16,
+                         color=node_color(n), x=(i - (len(items) - 1) / 2) * 130, y=tier * 150,
+                         physics=False, borderWidth=4 if hot else 1)
     for e in g["edges"]:
         net.add_edge(e["source"], e["target"], label=e["type"], arrows="to", color="#9aa5ae")
+    # fixed layout: no dragging, panning or zooming, so the graph stays put and just changes color
     net.set_options('{"edges":{"font":{"size":10,"align":"middle"},"smooth":false},'
-                    '"interaction":{"hover":true},"physics":{"enabled":false}}')
-    return net.generate_html()
+                    '"interaction":{"hover":true,"dragNodes":false,"dragView":false,"zoomView":false},'
+                    '"physics":{"enabled":false}}')
+    html = net.generate_html()
+    fit = 'network.once("afterDrawing", function(){ network.fit({animation:false}); });\n'
+    assert "return network;" in html
+    return html.replace("return network;", fit + "return network;", 1)
 
 
 # ------------------------------------------------------------------ header
@@ -149,7 +203,7 @@ with tab1:
         cols = st.columns(3)
         for col, m in zip(cols, state["machines"]):
             with col:
-                st.markdown(f'<div class="card" style="--c:{STATUS_COLORS.get(m["status"], "#888")}">'
+                st.markdown(f'<div class="card" style="{card_style(STATUS_COLORS.get(m["status"], "#888"))}">'
                             f'<div class="k">{m["name"]}</div><div class="v">{badge(m["status"])}</div>'
                             f'<div class="s">Utilization {m["utilization"]:.1f}% · Availability {m["availability"]:.1f}%</div></div>',
                             unsafe_allow_html=True)
@@ -167,18 +221,15 @@ with tab2:
         st.caption(f"KPIs over the last {kp.get('windowMinutes', '?')} minutes")
         status = {m["machineId"]: m["status"] for m in state["machines"]}
         for m in kp["machines"]:
-            st.markdown(f"#### {m['name']} &nbsp; {badge(status.get(m['machineId'], 'IDLE'))}", unsafe_allow_html=True)
+            st.markdown(f"#### {m['name']} &nbsp; {badge(status.get(m['machineId'], 'UNKNOWN'))}", unsafe_allow_html=True)
             c1, c2 = st.columns(2)
             c1.plotly_chart(gauge("Utilization", m["utilization"]), key=f"u-{m['machineId']}")
             c2.plotly_chart(gauge("Availability", m["availability"]), key=f"a-{m['machineId']}")
-        seg = status_segments(state["machines"])
-        st.markdown("#### Status timeline (last 60 minutes)")
-        if seg is not None:
-            fig = px.timeline(seg, x_start="Start", x_end="End", y="Machine", color="Status",
-                              color_discrete_map=STATUS_COLORS)
-            fig.update_yaxes(autorange="reversed", title=None)
-            fig.update_layout(height=230, margin=dict(l=10, r=10, t=10, b=10), xaxis_title=None)
+        st.markdown("#### Status over time (last 60 minutes)")
+        fig = status_chart(state["machines"])
+        if fig is not None:
             st.plotly_chart(fig, key="timeline")
+            st.caption("The line steps down when a machine goes IDLE or DOWN. Red shading marks DOWN periods.")
         else:
             st.info("Status history is not available from the API yet.")
         pred = client.predict()
@@ -196,13 +247,14 @@ with tab3:
         chips = "".join(f'<span class="chip"><i style="background:{c}"></i>{n}</span>' for n, c in NODE_COLORS.items())
         st.markdown(chips + '<span class="chip"><i style="background:#fff;border:3px solid #c0392b"></i>'
                     'red node = active alert</span>', unsafe_allow_html=True)
-        st.caption(f"{len(g['nodes'])} nodes · {len(g['edges'])} relationships. Hover a node to see its properties.")
+        st.caption(f"{len(g['nodes'])} nodes · {len(g['edges'])} relationships. Machines take their status color "
+                   "(green running, amber idle, red down) and alerts appear in red. Hover a node for its properties.")
         try:
             html = graph_html(g)
             if hasattr(st, "iframe"):  # newer Streamlit replaces components.html
-                st.iframe(html, height=580)
+                st.iframe(html, height=545)
             else:
-                components.html(html, height=580)
+                components.html(html, height=545)
         except Exception as e:  # keep the tab usable if pyvis fails
             st.error(f"Graph could not be drawn: {e}")
             st.dataframe(pd.DataFrame(g["edges"]), hide_index=True)
