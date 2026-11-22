@@ -238,13 +238,6 @@ with tab2:
             st.caption("The line steps down when a machine goes IDLE or DOWN. Red shading marks DOWN periods.")
         else:
             st.info("Status history is not available from the API yet.")
-        pred = client.predict()
-        st.markdown("#### Prediction")
-        if pred:
-            col = RED if pred["predictedStatus"] != "OK" else GREEN
-            card("Lathe DOWN risk", f"{pred['downRiskPct']}%", f"Predicted status: {pred['predictedStatus']}", col)
-        else:
-            st.caption("No prediction available (the /api/predict endpoint is optional).")
 
 # ------------------------------------------------------------------ knowledge graph
 with tab3:
