@@ -201,8 +201,7 @@ def graph_html(g):
 
 # ------------------------------------------------------------------ header
 st.title("Mechanical Workshop Digital Twin")
-st.caption(f"Live data: the replay sends one reading every {TICK_SECONDS} seconds and the page "
-           "updates as soon as it arrives.")
+
 
 try:
     state = client.state()
