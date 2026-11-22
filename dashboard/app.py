@@ -306,10 +306,14 @@ with tab4:
         df = pd.DataFrame(data["points"], columns=["timestamp", "value"])
         df["time"] = pd.to_datetime(df["timestamp"], utc=True)
         fig = px.line(df, x="time", y="value", title=f"{lim['label']} ({lim['unit']})")
-        fig.update_traces(line_color="#33475b")
+        # tooltip shows the exact reading and its time, e.g. "29.6 °C" at 20:49:31
+        fig.update_traces(line_color="#33475b", hovertemplate=f"%{{y:.1f}} {lim['unit']}<extra></extra>")
         if lim["limit"]:
             fig.add_hline(y=lim["limit"], line_color=RED, line_dash="dash", annotation_text=f"limit {lim['limit']}")
-        fig.update_layout(height=280, margin=dict(l=10, r=10, t=45, b=10), xaxis_title=None, yaxis_title=None)
+        # "x unified": hovering anywhere above or below a time shows the reading for that time,
+        # instead of only when the cursor is right on top of a data point
+        fig.update_layout(height=280, margin=dict(l=10, r=10, t=45, b=10), xaxis_title=None, yaxis_title=None,
+                          hovermode="x unified", xaxis_hoverformat="%H:%M:%S")
         cols[i % 2].plotly_chart(fig, key=f"h-{sig}")
     st.markdown("#### Alert log")
     al = safe(client.alerts) if LIVE else []
