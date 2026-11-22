@@ -162,13 +162,35 @@ def machine_status(props):
     return props.get("operationalStatus") or props.get("status")
 
 
+def machine_availability(props):
+    """Same Available / Occupied / Out of service state the Overview cards show."""
+    if props.get("availabilityState"):
+        return props["availabilityState"]
+    return {"IDLE": "Available", "RUNNING": "Occupied", "DOWN": "Out of service"}.get(machine_status(props))
+
+
 def node_color(n):
     props = n.get("properties") or {}
-    if n["label"] == "Machine" and machine_status(props) in STATUS_COLORS:
-        return STATUS_COLORS[machine_status(props)]  # machines follow their live status
+    if n["label"] == "Machine" and machine_availability(props) in AVAIL_COLORS:
+        return AVAIL_COLORS[machine_availability(props)]  # same colours as the Overview cards
     if n.get("alertActive"):
         return RED
     return NODE_COLORS.get(n["label"], "#999")
+
+
+def idle_view(g):
+    """No live data: show the workshop structure only, like the other tabs (no alerts, machines 'No data')."""
+    nodes, keep = [], set()
+    for n in g["nodes"]:
+        if n["label"] == "Alert":
+            continue
+        n = {**n, "alertActive": False, "properties": dict(n.get("properties") or {})}
+        if n["label"] == "Machine":
+            n["properties"]["availabilityState"] = "No data"
+        nodes.append(n)
+        keep.add(n["id"])
+    edges = [e for e in g["edges"] if e["source"] in keep and e["target"] in keep]
+    return {"nodes": nodes, "edges": edges}
 
 
 def graph_html(g):
@@ -181,7 +203,7 @@ def graph_html(g):
         for i, n in enumerate(items):
             props = n.get("properties") or {}
             hot = n.get("alertActive")
-            status = machine_status(props) if n["label"] == "Machine" else None
+            status = machine_availability(props) if n["label"] == "Machine" else None
             text = n["id"] + (f"\n{status}" if status else "")
             tip = n["label"] + "\n" + "\n".join(f"{k}: {v}" for k, v in props.items())
             net.add_node(n["id"], label=text, title=tip, shape="dot", size=22 if tier < 3 else 16,
@@ -280,11 +302,18 @@ with tab2:
 with tab3:
     g = safe(client.graph)
     if g:
-        chips = "".join(f'<span class="chip"><i style="background:{c}"></i>{n}</span>' for n, c in NODE_COLORS.items())
+        if not LIVE:
+            g = idle_view(g)
+            st.info("No live data: showing the workshop structure only. Machine states and alerts appear "
+                    "again as soon as the replay sends data.")
+        chips = "".join(f'<span class="chip"><i style="background:{c}"></i>{n}</span>'
+                        for n, c in NODE_COLORS.items() if n not in ("Machine", "Alert"))
+        chips += "".join(f'<span class="chip"><i style="background:{AVAIL_COLORS[s]}"></i>Machine: {s}</span>'
+                         for s in ("Available", "Occupied", "Out of service"))
         st.markdown(chips + '<span class="chip"><i style="background:#fff;border:3px solid #c0392b"></i>'
-                    'red node = active alert</span>', unsafe_allow_html=True)
-        st.caption(f"{len(g['nodes'])} nodes · {len(g['edges'])} relationships. Machines take their status color "
-                   "(green running, amber idle, red down) and alerts appear in red. Hover a node for its properties.")
+                    'Alert / node with an active alert</span>', unsafe_allow_html=True)
+        st.caption(f"{len(g['nodes'])} nodes · {len(g['edges'])} relationships. Machines use the same colours as "
+                   "the Overview cards. Hover a node for its properties.")
         try:
             html = graph_html(g)
             if hasattr(st, "iframe"):  # newer Streamlit replaces components.html

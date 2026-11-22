@@ -51,10 +51,20 @@ class Twin:
         self.run_started = ev["event_ts"]
         self.noise_window.clear()
         self.maintenance = {m: False for m in MACHINES}
-        for a in self.store.active_alerts():
+        closed = self.store.active_alerts()
+        for a in closed:
             self.store.clear_alert(a["alert_id"], ev["event_ts"])
             stmts.append(self.graph.alert_clear(a["alert_id"], ev["event_ts"]))
-        log.info("RUN      new run started at %s (closed %d open alert(s))", self.run_started, len(stmts))
+        # reset the same flags in Memgraph so the graph matches the twin's fresh state
+        stmts += [
+            ("MATCH (n) WHERE n:Zone OR n:Machine SET n.alertStatus=false", {}),
+            ("MATCH (m:Machine) SET m.maintenanceActive=false", {}),
+            # a maintenance event still open when the last run stopped will never get its COMPLETED message
+            ("MATCH (e:MaintenanceEvent {state:'STARTED'}) SET e.state='INTERRUPTED', e.interruptedAt=$ts",
+             {"ts": ev["event_ts"]}),
+        ]
+        stmts += [self._availability_stmt(mid) for mid in MACHINES]
+        log.info("RUN      new run started at %s (closed %d open alert(s))", self.run_started, len(closed))
         return stmts
 
     def _is_duplicate(self, topic, message_id, dedup_key):

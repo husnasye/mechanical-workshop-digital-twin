@@ -217,3 +217,18 @@ def test_live_flag_and_new_run_after_gap(tmp_path, monkeypatch):
     assert s["live"] is True and s["activeAlerts"] == 0
     assert s["machines"][0]["availabilityState"] == "Occupied"
     assert tw.kpis_for("machine1")["samples"] == 1   # only the new run counts
+
+
+def test_new_run_resets_graph_flags(tmp_path, monkeypatch):
+    """A new run also clears alert/maintenance flags in Memgraph so the graph matches the twin."""
+    import twin as twin_module
+    clock = [3_000_000.0]
+    monkeypatch.setattr(twin_module.time, "time", lambda: clock[0])
+    tw = make_twin(tmp_path)
+    tw.handle(*msg("status", "machine1", {"status": "DOWN"}, "2023-07-10T10:00:00Z"))
+    clock[0] += 60
+    tw.graph.sent.clear()
+    tw.handle(*msg("status", "machine1", {"status": "RUNNING"}, "2023-07-10T11:00:00Z"))
+    cypher = " ".join(q for q, _ in tw.graph.sent)
+    assert "m.maintenanceActive=false" in cypher and "n.alertStatus=false" in cypher
+    assert "e.state='INTERRUPTED'" in cypher and "al.active=false" in cypher
