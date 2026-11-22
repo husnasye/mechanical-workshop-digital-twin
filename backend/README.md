@@ -33,6 +33,3 @@ Topics: `workshop/zone1/environment`, `workshop/zone1/noise`, `workshop/machine1
 ```
 Status topics use `"measurements": {"status": "RUNNING"}`. Maintenance uses
 `{"event_id", "event_type", "start", "end", "reason"}`.
-
-## Tests
-`docker build -t workshop-twin-server . && docker run --rm workshop-twin-server python -m pytest -q`

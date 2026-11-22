@@ -1,6 +1,6 @@
 """Derived properties: KPIs, rule-based alerts and zone risk status.
 
-Pure functions only (no I/O), so they are easy to unit test and to check by hand.
+Pure functions only (no I/O), so the formulas are easy to check by hand.
 """
 
 

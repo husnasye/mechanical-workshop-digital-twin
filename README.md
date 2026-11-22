@@ -69,7 +69,7 @@ docker compose up -d --build      # rebuild after pulling new code
 |---|---|---|
 | `simulator/` | Muzaffar | dataset, `replay.py`, Dockerfile |
 | `mosquitto/` | Muzaffar | broker config |
-| `backend/` | Zafar | FastAPI app server, cleaning, analytics, Memgraph + SQLite, tests |
+| `backend/` | Zafar | FastAPI app server, cleaning, analytics, Memgraph + SQLite |
 | `dashboard/` | Husna | Streamlit dashboard |
 | `docker-compose.yml` | Muzaffar | all services |
 

@@ -47,7 +47,7 @@ st.markdown("""<style>
 # page as soon as it has, so the dashboard changes right after each tick is sent.
 TICK_SECONDS = 10
 WATCH_SECONDS = 1
-client = Client("live", API_BASE)
+client = Client(API_BASE)
 
 
 def tick_key(s):
@@ -158,8 +158,8 @@ def avail_badge(state):
 
 
 def machine_status(props):
-    # live graph (ontology) uses operationalStatus; the mock data uses status
-    return props.get("operationalStatus") or props.get("status")
+    # machine status as stored in the graph (ontology property operationalStatus)
+    return props.get("operationalStatus")
 
 
 def machine_availability(props):

@@ -2,4 +2,3 @@ fastapi==0.115.6
 uvicorn[standard]==0.32.1
 paho-mqtt==2.1.0
 neo4j==5.27.0  # Bolt client driver used to talk to Memgraph (no Neo4j server)
-pytest==8.3.4
