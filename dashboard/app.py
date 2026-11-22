@@ -250,7 +250,7 @@ with tab1:
         n = state["activeAlerts"]
         card("Active alerts", n, "all clear" if n == 0 else "see Alerts & History",
              RED if n else (GREEN if LIVE else GREY))
-    st.caption("Thresholds are demo values for this project, not regulatory limits. "
+    st.caption("The dashboard shows the current state of the workshop. Green = normal, "
                "Amber = approaching the limit, red = alert rule triggered. "
                "Available = idle and free to use, Occupied = running, Out of service = down or in maintenance.")
 
