@@ -149,6 +149,9 @@ class Storage:
     def active_alerts(self):
         return self._q("SELECT * FROM alerts WHERE active=1")
 
+    def all_alerts(self):
+        return self._q("SELECT * FROM alerts ORDER BY alert_id")
+
     def recent_alerts(self, limit=100, since=None):
         return self._q("SELECT * FROM alerts WHERE created_at>=? ORDER BY created_at DESC LIMIT ?",
                        (since or "", limit))

@@ -162,6 +162,24 @@ class Graph:
         return ("MATCH (al:Alert {alertId:$id}) SET al.active=false, al.clearedAt=$ts", {"id": alert_id, "ts": ts})
 
     @staticmethod
+    def alerts_resync(rows):
+        """Make every Alert node (and the alertStatus flags) match the SQLite alerts table.
+        Used after graph writes were skipped while Memgraph was unreachable."""
+        alerts = [{"id": r["alert_id"], "desc": r["description"], "sev": r["severity"], "rule": r["rule"],
+                   "asset": r["asset"], "active": bool(r["active"]), "created": r["created_at"],
+                   "cleared": r["cleared_at"]} for r in rows]
+        active_assets = sorted({a["asset"] for a in alerts if a["active"]})
+        return [
+            ("UNWIND $alerts AS a MERGE (al:Alert {alertId:a.id}) "
+             "SET al.description=a.desc, al.severity=a.sev, al.rule=a.rule, al.active=a.active, "
+             "al.createdAt=a.created, al.clearedAt=a.cleared "
+             "WITH al, a MATCH (x) WHERE (x:Zone AND x.zoneId=a.asset) OR (x:Machine AND x.machineId=a.asset) "
+             "MERGE (x)-[:TRIGGERS]->(al)", {"alerts": alerts}),
+            ("MATCH (n) WHERE n:Zone OR n:Machine "
+             "SET n.alertStatus = coalesce(n.zoneId, n.machineId) IN $assets", {"assets": active_assets}),
+        ]
+
+    @staticmethod
     def maintenance_upsert(ev):
         v = ev["values"]
         return ("MERGE (e:MaintenanceEvent {eventId:$id}) SET e.machineId=$mid, e.eventType=$type, e.startTime=$start, "

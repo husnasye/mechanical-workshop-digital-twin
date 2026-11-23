@@ -39,6 +39,9 @@ class Twin:
         self.maintenance = {m: False for m in MACHINES}
         self.last_rx = None      # wall-clock time of the last accepted message
         self.run_started = None  # event time of the first message of the current run
+        # True while Memgraph may be missing writes (at startup, or after a failed write).
+        # The next successful write is followed by a resync of all alerts from SQLite.
+        self.graph_dirty = True
         self._restore()
 
     def live(self):
@@ -80,6 +83,16 @@ class Twin:
             q.popleft()
         return any(mid == message_id or key == dedup_key for mid, key, _ in q)
 
+    def _write_graph(self, stmts):
+        """Write this event to Memgraph. If earlier writes were skipped, repair the alerts afterwards
+        so the graph never keeps an alert that SQLite has closed (or misses one it opened)."""
+        if not self.graph.run(stmts):
+            self.graph_dirty = True
+            return
+        if self.graph_dirty and self.graph.run(self.graph.alerts_resync(self.store.all_alerts())):
+            self.graph_dirty = False
+            log.info("GRAPH    alerts resynced from SQLite")
+
     def _restore(self):
         """Rebuild the in-memory latest state from SQLite after a restart."""
         for r in self.store.latest():
@@ -107,7 +120,7 @@ class Twin:
             self.recent[topic].append((ev["message_id"], ev["dedup_key"], time.time()))
             self.stats["accepted"] += 1
             stmts += self._apply(ev)
-            self.graph.run(stmts)
+            self._write_graph(stmts)
             note = f" ({'; '.join(ev['notes'])})" if ev["notes"] else ""
             log.info("ACCEPTED %-28s seq=%s %s%s", topic, ev.get("seq"), ev["values"], note)
             return ev
