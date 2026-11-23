@@ -252,14 +252,6 @@
       "style": {}
     },
     {
-      "id": "n3",
-      "fromId": "n4",
-      "toId": "n5",
-      "type": "PRODUCES",
-      "properties": {},
-      "style": {}
-    },
-    {
       "id": "n4",
       "fromId": "n5",
       "toId": "n1",
@@ -317,11 +309,19 @@
     },
     {
       "id": "n11",
+      "fromId": "n2",
+      "toId": "n3",
       "type": "HAS_SENSOR",
+      "properties": {},
+      "style": {}
+    },
+    {
+      "id": "n12",
+      "type": "PRODUCES",
       "style": {},
       "properties": {},
-      "fromId": "n2",
-      "toId": "n3"
+      "fromId": "n3",
+      "toId": "n5"
     }
   ]
 }
